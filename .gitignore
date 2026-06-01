@@ -1,0 +1,15 @@
+.env
+*.tmp
+__pycache__/
+.ipynb_checkpoints/
+results*/
+student_ckpt/
+plots/
+*.aux
+*.bcf
+*.bbl
+*.blg
+*.log
+*.out
+*.run.xml
+*.toc

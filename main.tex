@@ -1,0 +1,232 @@
+\documentclass[a4paper,12pt]{extarticle}
+\usepackage{geometry}
+\usepackage[T2A,T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[russian,english]{babel}
+\usepackage{setspace}
+\usepackage{csquotes}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{indentfirst}
+\usepackage[
+backend=biber,
+style=numeric,
+maxbibnames=99
+]{biblatex}
+\addbibresource{refs.bib}
+\usepackage[colorlinks,citecolor=blue,linkcolor=blue,bookmarks=false,hypertexnames=true, urlcolor=blue]{hyperref}
+\usepackage{mathtools}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{placeins}
+\setlength{\textfloatsep}{8pt plus 2pt minus 2pt}
+\setlength{\floatsep}{6pt plus 1pt minus 1pt}
+\setlength{\intextsep}{8pt plus 2pt minus 2pt}
+\setlength{\abovecaptionskip}{6pt}
+\setlength{\belowcaptionskip}{4pt}
+\geometry{left=2.5cm}
+\geometry{right=1.0cm}
+\geometry{top=2.0cm}
+\geometry{bottom=2.0cm}
+\setlength{\parindent}{1.25cm}
+\renewcommand{\baselinestretch}{1.5}
+
+\pagestyle{plain}
+
+\begin{document}
+\input{title}
+\newpage
+\setcounter{page}{2}
+
+{\hypersetup{linkcolor=black}\tableofcontents}
+
+\newpage
+\section*{Abstract}
+\addcontentsline{toc}{section}{Abstract}
+
+Named entity recognition is the task of finding mentions of people, organizations, locations, and other named objects in text. It is used in search, question answering, document analytics, news monitoring, and many other information extraction pipelines, where the recognizer is often run before more expensive downstream models. This work studies whether a compact sequence tagger can be trained with an additional explanation signal: besides gold token labels, the model receives short natural-language rationales generated before training by a large language model. The student model consists of a distilled Transformer encoder, a token-classification head, and a lightweight decoder used only during optimization. The tagging loss is combined with a rationale-generation loss, while inference uses only the encoder and the token-classification head. On the English CoNLL-2003 named entity recognition benchmark, the best run reaches 94.88\% validation span F1 and 93.35\% F1 on the official test set. The result is close to several established baselines, but the experiment should be read as a study of rationale-supervised training rather than as proof that rationales improve over the same architecture without them; a controlled ablation remains necessary for that claim.
+
+\selectlanguage{russian}
+\section*{Аннотация}
+\addcontentsline{toc}{section}{Аннотация}
+
+Распознавание именованных сущностей состоит в поиске в тексте упоминаний людей, организаций, географических объектов и других именованных объектов. Эта задача используется в поиске, вопросно-ответных системах, анализе документов, мониторинге новостей и других сценариях извлечения информации, где распознаватель часто запускается перед более дорогими последующими моделями. В работе исследуется, можно ли обучать компактную модель разметки последовательности с дополнительным объяснительным сигналом: кроме эталонных меток токенов модель получает короткие текстовые объяснения, заранее сгенерированные большой языковой моделью. Студенческая модель состоит из облегченного Transformer-энкодера, головы токен-классификации и небольшого декодера, который используется только во время оптимизации. Потеря на предсказание меток объединяется с потерей на генерацию объяснения, а на этапе применения используются только энкодер и голова классификации токенов. На англоязычном бенчмарке CoNLL-2003 для распознавания именованных сущностей лучший запуск достигает 94.88\% span F1 на валидации и 93.35\% F1 на официальном тестовом наборе. Результат близок к ряду известных базовых решений, однако эксперимент следует рассматривать как исследование обучения с объяснениями, а не как доказательство преимущества объяснений над той же архитектурой без них; для такого утверждения нужен контролируемый ablation-эксперимент.
+
+\selectlanguage{english}
+
+\section*{Keywords}
+\addcontentsline{toc}{section}{Keywords}
+Named entity recognition, rationale supervision, multi-task learning, efficient NLP, sequence labeling, CoNLL-2003
+
+\newpage
+
+\section{Introduction}
+\label{sec:introduction}
+
+Named entity recognition (NER) is the task of detecting spans in text that refer to named objects, such as people, organizations, locations, products, or events. In practical natural language processing (NLP) systems it is often one of the first stages of information extraction: recognized entities are later used for search filters, relation extraction, knowledge-base construction, document routing, and analytical dashboards. This makes the task important not only as a benchmark problem, but also as an engineering component whose errors can propagate to downstream modules.
+
+In the English CoNLL-2003 benchmark, NER is formulated as sequence labeling. Each token receives a tag in the BIO format: \texttt{B} marks the beginning of an entity span, \texttt{I} marks a continuation token inside the same span, and \texttt{O} marks tokens outside any entity. The entity types are persons, locations, organizations, and miscellaneous entities~\cite{tjong2003introduction}. Modern contextual encoders provide strong accuracy on this task, but larger models also increase memory use and inference latency, which matters when the recognizer is applied to large document streams or used inside interactive services.
+
+This work studies a compact alternative based on a distilled Transformer encoder. The model is trained not only to predict BIO tags, but also to generate short rationales explaining the gold spans. This idea follows the broader line of knowledge distillation and step-by-step distillation, where a smaller model receives richer supervision than the final label alone~\cite{hinton2015distilling,hsieh2023distilling}. The goal is not to claim a new state of the art, but to evaluate whether this training setup can produce a competitive NER tagger while keeping inference limited to the encoder and the token-classification head.
+
+The main contributions are:
+\begin{enumerate}
+    \item We adapt step-by-step distillation to BIO sequence labeling, where rationales act as auxiliary supervision rather than replacement labels.
+    \item We train a compact encoder-based NER student with a rationale decoder used only during training, and evaluate it on the official CoNLL-2003 test split.
+    \item We report results across random seeds and compare the best run with published CoNLL-2003 systems, while explicitly separating observed results from claims that require additional ablations.
+\end{enumerate}
+
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Compression and distillation}
+Knowledge distillation trains a smaller student model with information obtained from a larger teacher~\cite{hinton2015distilling}. The transferred signal may be a soft class distribution, intermediate hidden representations, attention maps, or other auxiliary targets~\cite{romero2014fitnets,heo2019knowledge}. For Transformer encoders, DistilBERT reduces the size of BERT by training a smaller model to imitate the original encoder during pretraining~\cite{sanh2019distilbert}; TinyBERT follows a similar compression direction with layer-wise distillation~\cite{jiao2019tinybert}. These models are attractive because they reduce inference cost without changing the downstream task interface.
+
+However, plain use of a distilled encoder for NER still trains the task model mainly from the final BIO labels. This is a narrow supervision signal: the model sees which spans are correct, but not why a particular token sequence should be treated as a person, organization, or location. The present work keeps the advantages of a compact encoder, but adds a training-time objective based on explanations of the labels.
+
+\subsection{Rationale supervision}
+Free-text rationales and chain-of-thought style explanations have been studied as a way to expose intermediate reasoning in language models~\cite{wei2022chain}. Hsieh et al.~\cite{hsieh2023distilling} use large-language-model explanations as an additional target for smaller models. Their setting motivates the question considered here: whether label explanations can be useful for a token-level sequence labeling task, where the output is not a single class but a structured BIO tag sequence.
+
+In this work, rationales are not used at inference and are not treated as ground-truth linguistic analyses. They are auxiliary training targets generated before student training. The evaluation remains the standard NER evaluation on predicted entity spans.
+
+\subsection{NER and multi-task learning}
+NER has been studied since the Message Understanding Conferences~\cite{grishman1996message}. Earlier neural systems often combined recurrent encoders with conditional random fields~\cite{huang2015bidirectional}; later work moved toward pretrained contextual encoders such as BERT~\cite{devlin2018bert}. Multi-task learning is a general approach for improving shared representations by adding related objectives~\cite{caruana1997multitask,collobert2008unified}. Here the auxiliary task is conditional language modeling of an explanation $r$ given the encoded sentence.
+
+\section{Method}
+\label{sec:approach}
+
+\subsection{Data and notation}
+Each example contains a word-aligned sentence $x=(x_1,\ldots,x_n)$, a BIO tag sequence $y=(y_1,\ldots,y_n)$, and a rationale $r$. The BIO sequence uses nine labels: \texttt{O}, plus beginning and inside labels for the four entity types. When a word is split into subwords, the gold tag is assigned only to the first subtoken; the remaining subtokens are ignored in the token-classification loss. Rationales are fixed before student training, so no teacher model is called during optimization.
+
+\subsection{Student architecture}
+The student has three parts. First, a compact bidirectional Transformer encoder maps input tokens to contextual vectors. Second, a linear token-classification head predicts one BIO label for each supervised token. Third, an autoregressive decoder attends to the encoder states and predicts the text rationale during training.
+
+The implementation uses DistilBERT as the encoder and DistilGPT2 as the decoder. DistilBERT is chosen because it is a standard compressed BERT-style encoder and provides a natural baseline for efficient token classification~\cite{sanh2019distilbert}. DistilGPT2 is used only as a lightweight text decoder for the auxiliary rationale objective~\cite{radford2019language}. The decoder is excluded from the inference path for NER.
+
+\begin{itemize}
+    \item Encoder: DistilBERT-base-cased, about 66M parameters.
+    \item NER head: dropout followed by a linear map to $|\mathcal{Y}|{=}9$ BIO labels.
+    \item Decoder: DistilGPT2, about 82M parameters, with cross-attention to the encoder and teacher forcing on $r$.
+\end{itemize}
+
+The full training model has approximately 150M trainable parameters. The deployable NER model has only the encoder and token-classification head, approximately 66M parameters plus a small linear layer.
+
+\subsection{Loss and checkpoint selection}
+\begin{equation}
+\label{eq:total-loss}
+\mathcal{L} = \alpha\,\mathcal{L}_{\mathrm{NER}} + (1-\alpha)\,\mathcal{L}_{\mathrm{rat}}, \qquad \alpha \in (0,1).
+\end{equation}
+$\mathcal{L}_{\mathrm{NER}}$ is token cross-entropy on supervised positions; $\mathcal{L}_{\mathrm{rat}}$ is the causal language-modeling loss on the rationale. We use $\alpha{=}0.7$. The checkpoint with the highest validation span F1 is kept; training stops after five epochs without improvement.
+
+\section{Experiments}
+\label{sec:experiments}
+
+\subsection{Data and evaluation protocol}
+\label{sec:data-protocol}
+
+We use the English CoNLL-2003 NER benchmark~\cite{tjong2003introduction}. Rationales are generated offline from each sentence and its gold BIO tags by gpt-oss 120B, using a prompt that asks the model to explain which spans correspond to the entity labels. They are used only as training-time auxiliary targets; evaluation uses predicted BIO tags only.
+
+The student is trained on 12\,750 rationale-augmented sentences. A separate 1\,000-sentence validation holdout is sampled from the development data with split seed~42 and is used only for checkpoint selection. The final score is reported on the official test file used by the benchmark.
+
+\textbf{Test results} are reported on the complete standard test set used by the run (3\,453 sentences; 5\,648 entity mentions). Rationales are not used at inference; the deployed NER path consists of the encoder and token-classification head.
+
+\subsection{Training setup}
+\label{sec:hyperparams}
+
+Training uses FP16 on GPU and gradient clipping at~1.0. Table~\ref{tab:hyperparams} lists the main settings. The reported runs use seeds 42 and 456; within each seed, we select the checkpoint with the highest validation span F1.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Hyperparameters of the main experiment.}
+\label{tab:hyperparams}
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\toprule
+\textbf{Setting} & \textbf{Value} \\
+\midrule
+Encoder & \texttt{distilbert-base-cased} \\
+Decoder & \texttt{distilgpt2} with cross-attention to the encoder \\
+Trainable parameters & $\sim$150\,M \\
+Inference parameters & $\sim$66\,M + token-classification head \\
+Training set & 12\,750 rationale-augmented sentences \\
+Validation set & 1\,000 rationale-augmented sentences (held out) \\
+Loss weight $\alpha$ (Eq.~\eqref{eq:total-loss}) & 0.7 \\
+Optimizer & AdamW, lr $2\times 10^{-5}$, weight decay 0.01 \\
+Batch size & 8 \\
+Max encoder / decoder length & 256 subwords \\
+Epochs (max.) / early stopping & 25 / 5 epochs without validation F1 gain \\
+Random seeds & 42, 456 \\
+Metric & Span-level F1 (\texttt{seqeval}) \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Results}
+\label{sec:main-results}
+
+Table~\ref{tab:sota} gives the main comparison with published CoNLL-2003 systems. It includes a reported DistilBERT token-classification baseline, because the closest practical reference point is an ordinary compact tagger without a rationale decoder. The proposed model is below the strongest large systems in the table, especially LUKE, but it is above the reported DistilBERT and BERT\textsubscript{BASE} rows while using a DistilBERT-sized inference path. Because the table compares results from different papers and training recipes, it should be interpreted as context rather than a fully controlled benchmark.
+
+\begin{table}[H]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\caption{Test span F1 on English CoNLL-2003: published systems and our rationale-supervised student. Scores can vary across implementations and evaluation scripts, so the table should be read as a practical comparison rather than a controlled benchmark.}
+\label{tab:sota}
+\begin{tabularx}{\linewidth}{@{}Xcc@{}}
+\toprule
+\textbf{Model} & \textbf{Params.} & \textbf{Test F1 (\%)} \\
+\midrule
+BERT\textsubscript{BASE} (Flair experiment)~\cite{schweter2019flairconll} & $\sim$110\,M & 91.38 \\
+DistilBERT\textsubscript{BASE} (uncased, Flair experiment)~\cite{schweter2019flairconll} & $\sim$66\,M & 90.68 \\
+BERT\textsubscript{BASE}~\cite{devlin2018bert} & $\sim$110\,M & 92.4 \\
+Flair + BiLSTM--CRF~\cite{akbik2018contextual} & --- & 93.09 \\
+RoBERTa\textsubscript{LARGE}~\cite{liu2019roberta} & $\sim$355\,M & 93.6 \\
+DeBERTa-v3\textsubscript{LARGE}~\cite{he2021debertav3} & $\sim$435\,M & 93.4 \\
+LUKE~\cite{yamada2020luke} & $\sim$587\,M & 94.3 \\
+\midrule
+Ours (rationale-supervised DistilBERT tagger) & $\sim$66\,M inference / $\sim$150\,M training & 93.35 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The best run reaches 93.35\% test F1. This is not a state-of-the-art result: RoBERTa\textsubscript{LARGE}, DeBERTa-v3\textsubscript{LARGE}, and LUKE are stronger or comparable. The relevant observation is narrower: the rationale-supervised student is stronger than the reported DistilBERT baseline in Table~\ref{tab:sota} and remains in the range of established CoNLL-2003 baselines while the deployed tagger is about the size of DistilBERT rather than a large encoder.
+
+Table~\ref{tab:seed-results} reports the seed-level results used for model selection. These runs are a small robustness check over random initialization and data order, not the main comparison. The test scores are close across seeds, so the selected run is not separated from the second run by a large margin.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Span F1 of the best checkpoint per seed, selected on validation F1.}
+\label{tab:seed-results}
+\begin{tabularx}{0.95\linewidth}{@{}lcccc@{}}
+\toprule
+\textbf{Seed} & \textbf{Best epoch} & \textbf{Epochs trained} & \textbf{Validation F1 (\%)} & \textbf{Test F1 (\%)} \\
+\midrule
+42 & 7 & 12 & 94.88 & 93.35 \\
+456 & 11 & 16 & 94.45 & 93.28 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\paragraph{Discussion.}
+The current experiment supports a modest conclusion. A compact encoder tagger trained with rationale supervision can reach competitive CoNLL-2003 accuracy, and the decoder does not increase inference cost because it is used only during training. At the same time, the experiment does not isolate the contribution of the rationale objective. To show that rationales improve the model, the necessary comparison is the same encoder and NER head trained on the same data with BIO labels only.
+
+\subsection{Limitations}
+\label{sec:limitations}
+The main limitation is the absence of a controlled no-rationale ablation. Therefore, the work cannot claim that rationales are better than ordinary supervised fine-tuning of the same student. The comparison to published systems is also not fully controlled, because those systems differ in pretraining, fine-tuning recipe, and sometimes data preprocessing. A stronger evaluation would train compact baselines on the same split, including a DistilBERT token classifier without the rationale decoder. Finally, rationale quality depends on the teacher prompt and decoding settings, which were not systematically tuned.
+
+\FloatBarrier
+\section{Conclusion}
+\label{sec:conclusion}
+
+We trained a compact NER student with a distilled encoder, a token-classification head, and a rationale decoder used only during optimization. On CoNLL-2003, the best run reaches 94.88\% validation F1 and 93.35\% official test F1. The result is close to several established baselines while keeping the inference path limited to a DistilBERT-sized tagger. The experiment is best interpreted as an implementation and evaluation of rationale-supervised NER training; a controlled no-rationale baseline is required before making a causal claim about the benefit of explanations.
+
+\newpage
+\printbibliography[heading=bibintoc,title={References}]
+
+\end{document}
